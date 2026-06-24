@@ -1,4 +1,4 @@
-datasets/test
-datasets/train
-datasets/valid
+dataset/test
+dataset/train
+dataset/valid
 .qwen
