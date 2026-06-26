@@ -1,5 +1,7 @@
 dataset/test
 dataset/train
 dataset/valid
-.qwen
 notebook/runs/detect/v8n/train_bottle/predict_test_set
+
+.qwen
+graphify-out
