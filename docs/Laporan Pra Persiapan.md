@@ -18,24 +18,30 @@ Dokumen ini berisi rencana kerja lengkap untuk proyek deteksi sampah botol plast
 | Jibril        | NVIDIA RTX 3050      | 6 GB    | **Satu-satunya untuk training** |
 | Anggota lain  | Integrated / None    | —       | Hanya untuk development & inferensi CPU |
 
-### 2.2 Rekomendasi: YOLOv8 Small (`yolov8s`)
+### 2.2 Model yang Digunakan: YOLOv8 Small (`yolov8s`)
 
 Dengan VRAM 6 GB pada RTX 3050, varian yang sesuai adalah:
 
-| Varian    | Parameter | VRAM (est.) | mAP@50   | Status       |
-|-----------|-----------|-------------|----------|--------------|
-| YOLOv8n   | 3.2 M     | ~1.5 GB     | 0.88     | Opsi ringan  |
-| YOLOv8s   | 11.2 M    | ~3.0 GB     | 0.92     | **Dipilih**  |
-| YOLOv8m   | 25.9 M    | ~5.5 GB     | 0.95     | Ketat, perlu batch kecil |
-| YOLOv8l   | 43.7 M    | ~8.0 GB     | 0.96     | Tidak muat   |
-| YOLOv8x   | 68.2 M    | ~12.0 GB    | 0.97     | Tidak muat   |
+| Varian    | Parameter | VRAM (est.) | mAP@50 COCO | Hasil Aktual |
+|-----------|-----------|-------------|-------------|--------------|
+| YOLOv8n   | 3.2 M     | ~1.5 GB     | 0.88        | **0.447** ✅ |
+| YOLOv8s   | 11.2 M    | ~3.0 GB     | 0.92        | **0.455** ✅ **Dipilih** |
+| YOLOv8m   | 25.9 M    | ~5.5 GB     | 0.95        | Tidak dicoba  |
+| YOLOv8l   | 43.7 M    | ~8.0 GB     | 0.96        | Tidak muat   |
+| YOLOv8x   | 68.2 M    | ~12.0 GB    | 0.97        | Tidak muat   |
 
-**Alasan memilih YOLOv8s:**
-- VRAM 6 GB cukup untuk menjalankan YOLOv8s dengan leluasa (butuh ~3 GB)
-- Akurasi lebih tinggi dibanding YOLOv8n (mAP@50 0.92 vs 0.88)
-- Jumlah parameter (11.2M) masih ringan, training tetap cepat
-- YOLOv8m (~5.5 GB) bisa dicoba sebagai eksperimen lanjutan dengan batch size kecil (4)
-- Framework Ultralytics mendukung YOLOv8 secara native dengan API yang sederhana
+> **Catatan:** mAP@50 pada tabel adalah benchmark COCO. Hasil aktual pada dataset botol plastik lebih rendah (lihat laporan analisis).
+
+**Alasan memilih YOLOv8s (aktual):**
+- VRAM 6 GB cukup (batch 8, ~4 GB terpakai)
+- Training selesai dalam ~80 menit untuk 71 epoch
+- Performa lebih stabil dibanding YOLOv8n pada validation set
+
+**Eksperimen dilakukan pada 2 varian:**
+1. **YOLOv8n** — batch 13, AdamW, 100 epoch, mAP@50 test = 0.447
+2. **YOLOv8s** — batch 8, SGD + cos_lr, 71 epoch (early stop), mAP@50 val = 0.455
+
+Hasil detail ada di `docs/Laporan Analisis Training YOLOv8s.md`.
 
 **Framework:** [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) — library Python resmi dengan dokumentasi lengkap dan dukungan CUDA out-of-the-box.
 
@@ -161,45 +167,53 @@ File `data.yaml` perlu diperbarui agar menggunakan path lokal relatif. Perubahan
 
 ### Tahap 3 — Training Model
 
-#### 3.3.1 Konfigurasi Training
+#### 3.3.1 Konfigurasi Training (Aktual)
 
-Parameter training yang direkomendasikan untuk RTX 3050 (6 GB VRAM):
+Training dilakukan dengan 2 varian model. Berikut parameter aktual yang digunakan:
 
-| Parameter    | Nilai   | Alasan                                        |
+**Eksperimen 1: YOLOv8n**
+| Parameter    | Nilai   | Keterangan                                    |
 |--------------|---------|-----------------------------------------------|
-| `model`      | yolov8s.pt | Varian small, akurasi lebih tinggi, muat di VRAM 6 GB |
-| `data`       | datasets/data.yaml | Konfigurasi dataset lokal           |
-| `epochs`     | 50–100  | Cukup untuk 1 kelas, bisa early stop          |
-| `imgsz`      | 640     | Ukuran standar, keseimbangan akurasi vs speed |
-| `batch`      | 16–32   | VRAM 6 GB cukup untuk batch lebih besar       |
-| `device`     | 0       | GPU pertama (RTX 3050)                        |
-| `workers`    | 4       | Data loading parallel                         |
-| `patience`   | 15      | Early stopping jika tidak ada improvement     |
+| `model`      | yolov8n.pt | Nano variant (3.2M params) — eksperimen awal |
+| `batch`      | 13      | Auto-batch — ~68% VRAM                        |
+| `optimizer`  | AdamW   | LR 0.002 (auto-detect)                        |
+| `epochs`     | 100     | Selesai penuh                                 |
+| `cos_lr`     | true    | Cosine learning rate decay                    |
 
-#### 3.3.2 Script Training
+**Eksperimen 2: YOLOv8s (Final)**
+| Parameter    | Nilai   | Keterangan                                    |
+|--------------|---------|-----------------------------------------------|
+| `model`      | yolov8s.pt | Small variant (11.2M params) — final dipilih |
+| `batch`      | 8       | Dibutuhkan karena VRAM lebih terpakai         |
+| `optimizer`  | SGD     | Momentum 0.937, weight decay 0.0005           |
+| `epochs`     | 100     | Early stop di epoch 71 (patience 30)          |
+| `cos_lr`     | true    | Cosine learning rate decay                    |
 
-```python
-from ultralytics import YOLO
+**Parameter umum:**
+| Parameter    | Nilai   |
+|--------------|---------|
+| `imgsz`      | 640     |
+| `device`     | 0 (RTX 3050) |
+| `workers`    | 4       |
+| `close_mosaic` | 15   |
+| `cache`      | true    |
+| `seed`       | 42      |
 
-# Load model pre-trained
-model = YOLO("yolov8s.pt")
+#### 3.3.2 Hasil Training
 
-# Training
-results = model.train(
-    data="datasets/data.yaml",
-    epochs=100,
-    imgsz=640,
-    batch=16,
-    device=0,
-    workers=4,
-    patience=15,
-    project="runs/detect",
-    name="train_bottle",
-    pretrained=True,
-    optimizer="auto",
-    verbose=True,
-)
-```
+Ringkasan hasil training:
+
+| Metrik | YOLOv8n (Test) | YOLOv8s (Val) | Target |
+|--------|----------------|---------------|--------|
+| Precision | 0.643 | **0.629** | ≥ 0.85 |
+| Recall | 0.458 | **0.557** | ≥ 0.85 |
+| mAP@50 | 0.447 | **0.455** | ≥ 0.90 |
+| mAP@50-95 | 0.330 | **0.311** | ≥ 0.60 |
+| Waktu | ~57 menit | ~80 menit | — |
+
+> **Catatan:** YOLOv8s tidak memberikan peningkatan signifikan dibanding YOLOv8n. Bottleneck utama ada pada dataset, bukan arsitektur model.
+
+Lihat laporan analisis lengkap di `docs/Laporan Analisis Training YOLOv8s.md`.
 
 #### 3.3.3 Monitoring Training
 
@@ -207,38 +221,35 @@ Selama training, Ultralytics otomatis menghasilkan:
 - **Loss curves** — `results.png` (box_loss, cls_loss, dfl_loss)
 - **Metric curves** — precision, recall, mAP per epoch
 - **Confusion matrix** — `confusion_matrix.png`
-- **Best weights** — `runs/detect/train_bottle/weights/best.pt`
+- **Best weights** — `notebook/runs/detect/v8s/train_bottle/weights/best.pt`
 
-Monitor VRAM usage dengan `nvidia-smi` di terminal terpisah. Jika OOM (Out of Memory), turunkan `batch` ke 8 atau `imgsz` ke 416.
+Output training disimpan di:
+- YOLOv8n (notebook): `notebook/runs/detect/v8n/train_bottle/`
+- YOLOv8s (notebook): `notebook/runs/detect/v8s/train_bottle/`
 
 ---
 
 ### Tahap 4 — Evaluasi Model
 
-#### 3.4.1 Evaluasi pada Test Set
+#### 3.4.1 Evaluasi pada Test Set (Aktual)
+
+Evaluasi dilakukan pada **test set** (648 gambar, 792 instance) menggunakan model terbaik:
 
 ```python
 from ultralytics import YOLO
 
-model = YOLO("runs/detect/train_bottle/weights/best.pt")
-
-# Evaluasi pada test set
-metrics = model.val(data="datasets/data.yaml", split="test")
-
-print(f"Precision : {metrics.box.mp:.4f}")
-print(f"Recall    : {metrics.box.mr:.4f}")
-print(f"mAP@50    : {metrics.box.map50:.4f}")
-print(f"mAP@50-95 : {metrics.box.map:.4f}")
+best_model = YOLO("notebook/runs/detect/v8n/train_bottle/weights/best.pt")
+metrics = best_model.val(data="../dataset/data.yaml", split="test")
 ```
 
-#### 3.4.2 Metrik yang Dilaporkan
+| Metrik       | Hasil (YOLOv8n) | Target   | Status |
+|--------------|-----------------|----------|--------|
+| Precision    | 0.578 – 0.643  | ≥ 0.85   | ❌ Tidak tercapai |
+| Recall       | 0.458 – 0.499  | ≥ 0.85   | ❌ Tidak tercapai |
+| mAP@50       | 0.446 – 0.447  | ≥ 0.90   | ❌ Tidak tercapai |
+| mAP@50-95    | 0.319 – 0.330  | ≥ 0.60   | ❌ Tidak tercapai |
 
-| Metrik       | Deskripsi                                                  | Target   |
-|--------------|------------------------------------------------------------|----------|
-| Precision    | Dari semua deteksi positif, berapa yang benar              | ≥ 0.85   |
-| Recall       | Dari semua objek asli, berapa yang berhasil terdeteksi     | ≥ 0.85   |
-| mAP@50       | Mean Average Precision pada IoU threshold 0.50             | ≥ 0.90   |
-| mAP@50-95    | Mean Average Precision pada IoU 0.50 s.d. 0.95            | ≥ 0.60   |
+> **Analisis:** Semua metrik belum mencapai target. Faktor utama: dataset kecil (~2.177 train), anotasi tidak konsisten, dan variasi objek tinggi. Lihat laporan analisis untuk rekomendasi perbaikan.
 
 ---
 
@@ -304,16 +315,16 @@ Program harus menampilkan:
 
 | Tugas                          | Penanggung Jawab | Status    |
 |--------------------------------|------------------|-----------|
-| Setup environment & CUDA       | Jibril           | Pending   |
-| Verifikasi & perbaikan dataset | Jibril           | Pending   |
-| Training model                 | Jibril           | Pending   |
-| Evaluasi model                 | Jibril           | Pending   |
-| Implementasi deteksi (gambar)  | TBD              | Pending   |
-| Implementasi deteksi (webcam)  | TBD              | Pending   |
-| Dokumentasi pengerjaan         | Seluruh tim      | Pending   |
-| Penyusunan laporan akhir       | Seluruh tim      | Pending   |
-| Slide presentasi               | TBD              | Pending   |
-| Video presentasi / demo        | TBD              | Pending   |
+| Setup environment & CUDA       | Jibril           | ✅ Selesai |
+| Verifikasi & perbaikan dataset | Jibril           | ✅ Selesai |
+| Training model (YOLOv8n & v8s) | Jibril           | ✅ Selesai |
+| Evaluasi model                 | Jibril           | ✅ Selesai |
+| Implementasi deteksi (gambar)  | Jibril           | ✅ Selesai |
+| Implementasi deteksi (webcam)  | Jibril           | ✅ Selesai |
+| Dokumentasi pengerjaan         | Seluruh tim      | ✅ Selesai |
+| Penyusunan laporan akhir       | Seluruh tim      | Diproses   |
+| Slide presentasi               | TBD              | Diproses   |
+| Video presentasi / demo        | TBD              | Diproses   |
 
 > **Catatan:** Training dan evaluasi dilakukan eksklusif di laptop Jibril (RTX 3050). Anggota lain dapat membantu implementasi inferensi dan penyusunan laporan.
 
@@ -321,15 +332,15 @@ Program harus menampilkan:
 
 ## 5. Timeline Pengerjaan
 
-| Tanggal        | Kegiatan                                    | Output                    |
-|----------------|---------------------------------------------|---------------------------|
-| 17 – 18 Juni  | Setup environment, verifikasi dataset       | Environment siap, dataset valid |
-| 19 – 20 Juni  | Training model, tuning hyperparameter       | Model terbaik (.pt)       |
-| 21 – 22 Juni  | Evaluasi model, analisis hasil              | Metrik evaluasi lengkap   |
-| 23 – 24 Juni  | Implementasi deteksi (gambar, video, webcam)| Program berfungsi         |
-| 25 – 26 Juni  | Dokumentasi, penyusunan laporan & slide     | Draft laporan & slide     |
-| 27 Juni       | Video demo, review akhir                    | Semua berkas lengkap      |
-| 28 Juni       | **Pengumpulan seluruh berkas**              | ✅ Submit                  |
+| Tanggal        | Kegiatan                                    | Output                    | Realisasi |
+|----------------|---------------------------------------------|---------------------------|-----------|
+| 17 – 18 Juni  | Setup environment, verifikasi dataset       | Environment siap, dataset valid | ✅ |
+| 19 – 20 Juni  | Training model (YOLOv8n eksperimen 1)       | Model YOLOv8n terlatih    | ✅ |
+| 22 – 23 Juni  | Training model (YOLOv8s eksperimen 2)       | Model YOLOv8s terlatih    | ✅ |
+| 24 Juni       | Implementasi deteksi (gambar, webcam)       | Program berfungsi         | ✅ |
+| 25 – 27 Juni  | Evaluasi, dokumentasi, penyusunan laporan   | Metrik evaluasi + laporan | ✅ |
+| 27 – 28 Juni  | Slide presentasi, video demo                | Slide + video demo        | Diproses |
+| 28 Juni       | **Pengumpulan seluruh berkas**              | ✅ Submit                  | ✅ |
 
 ---
 
@@ -338,29 +349,30 @@ Program harus menampilkan:
 ### Environment
 - [x] Python 3.12 terinstall
 - [x] PyTorch 2.6 terinstall
-- [ ] NVIDIA Driver & CUDA Toolkit terinstall (`nvidia-smi` OK)
-- [ ] Virtual environment dibuat
-- [ ] `ultralytics`, `opencv-python`, `matplotlib` terinstall
-- [ ] `torch.cuda.is_available()` → `True`
+- [x] NVIDIA Driver & CUDA Toolkit terinstall (`nvidia-smi` OK)
+- [x] Virtual environment dibuat
+- [x] `ultralytics`, `opencv-python`, `matplotlib` terinstall
+- [x] `torch.cuda.is_available()` → `True`
 
 ### Dataset
-- [ ] Dataset sudah di-extract ke folder `datasets/`
-- [ ] `data.yaml` sudah menggunakan path lokal (bukan path Kaggle)
-- [ ] Jumlah images = jumlah labels di setiap split
-- [ ] Format label YOLO sudah benar (class_id, x_center, y_center, w, h)
-- [ ] Visualisasi sampel gambar + bbox sudah dicek
+- [x] Dataset sudah di-extract ke folder `dataset/` (bukan `datasets/`)
+- [x] `data.yaml` sudah menggunakan path lokal
+- [x] Jumlah images = jumlah labels di setiap split (✅ train: 2177/2177, valid: 1174/1174, test: 648/648)
+- [x] Format label YOLO sudah diverifikasi
+- [x] Visualisasi sampel gambar + bbox sudah dicek
 
 ### Training
-- [ ] Pre-trained weight `yolov8s.pt` tersedia (auto-download saat pertama kali run)
-- [ ] Script training sudah disiapkan di notebook/Python
-- [ ] VRAM monitoring siap (`nvidia-smi`)
-- [ ] Plan fallback jika OOM (turunkan batch/imgsz)
+- [x] YOLOv8n — training selesai (100 epoch, mAP@50 = 0.447)
+- [x] YOLOv8s — training selesai (71 epoch, early stop, mAP@50 = 0.455)
+- [x] VRAM monitoring — OK (batch 8, ~4 GB terpakai)
+- [x] Model terbaik terseleksi — `weights/best.pt`
+- [x] Model di-export ke format ONNX
 
 ### Deliverables
-- [ ] Laporan proyek
-- [ ] Kode program (repository GitHub)
+- [x] Laporan proyek (dokumen ini + laporan analisis)
+- [x] Kode program (repository GitHub)
 - [ ] Slide presentasi
-- [ ] Dokumentasi pengerjaan (screenshot)
+- [x] Dokumentasi pengerjaan (screenshot)
 - [ ] Video presentasi / demo
 
 ---
@@ -379,4 +391,10 @@ Program harus menampilkan:
 
 ## 8. Kesimpulan
 
-Proyek ini menggunakan **YOLOv8 Small** melalui framework **Ultralytics** dengan lingkungan **Python 3.12** dan **PyTorch 2.6**. VRAM 6 GB pada RTX 3050 cukup leluasa untuk menjalankan YOLOv8s (butuh ~3 GB), memberikan akurasi lebih tinggi dibanding varian nano. Dataset sudah tersedia dalam format YOLO dan hanya memerlukan perbaikan path pada `data.yaml`. Proses utama meliputi 5 tahap: setup environment, verifikasi dataset, training, evaluasi, dan implementasi inferensi. Seluruh pengerjaan ditargetkan selesai dalam 12 hari (17–28 Juni 2025) dengan pembagian tugas yang jelas antar anggota tim.
+Proyek ini menggunakan **YOLOv8** (varian nano dan small) melalui framework **Ultralytics** dengan lingkungan **Python 3.12** dan **PyTorch 2.6**. VRAM 6 GB pada RTX 3050 cukup untuk menjalankan training YOLOv8s dengan batch 8. Dataset sudah tersedia dalam format YOLO dan telah diverifikasi. 
+
+**Hasil training:**
+- **YOLOv8n** (3.2M params, batch 13, AdamW): mAP@50 = **0.447** (test set)
+- **YOLOv8s** (11.2M params, batch 8, SGD + cos_lr): mAP@50 = **0.455** (validation set)
+
+Kedua varian menghasilkan performa yang mendekati sama, menunjukkan bottleneck pada dataset. Proses utama meliputi 5 tahap: setup environment, verifikasi dataset, training (2 varian), evaluasi, dan implementasi inferensi. Seluruh pengerjaan ditargetkan selesai pada 28 Juni 2025. Lihat laporan analisis terpisah di `docs/Laporan Analisis Training YOLOv8s.md`.
