@@ -122,11 +122,6 @@ DFL Loss:  1.701 → 1.240  📉
 │   ├── implementationYOLOv8n.ipynb
 │   ├── colabeval.ipynb
 │   └── implementcamera.ipynb
-├── 📂 website/                  # Website deteksi (Flask)
-│   ├── app.py
-│   ├── requirements.txt
-│   ├── static/
-│   └── templates/
 └── README.md
 ```
 
@@ -247,6 +242,6 @@ Proyek ini dikembangkan untuk **keperluan akademik** — Tugas Akhir Mata Kuliah
 
 <div align="center">
 
-**© 2025 — Kelompok Deteksi Botol Plastik**
+**© 2026 — Kelompok Deteksi Botol Plastik**
 
 </div>
